@@ -1,13 +1,22 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
 class Node:
-    """Represents a zone in the map. (Hub)"""
+    """Represent a zone in the map."""
+
     name: str
     x: int
     y: int
     type: str = "normal"
     max_drones: int = 1
-    color: Optional[str] = None
+    color: str | None = None
+
+    @property
+    def cost(self) -> int:
+        """Return cost between turns to entry in restricted"""
+        if self.type == "restricted":
+            return 2
+        return 1

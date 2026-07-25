@@ -1,110 +1,176 @@
+from __future__ import annotations
+
 import re
-from constants import ALLOWED_HUB_TAGS, HUB_PATTERN, CONN_PATTERN
+from typing import Any
+
+from constants import ALLOWED_HUB_TAGS, CONN_PATTERN, HUB_PATTERN
 
 
 class Parser:
     """Responsible for reading and validating the Fly-in input file."""
 
-    def __init__(self, filepath: str):
+    def __init__(self, filepath: str) -> None:
         self.filepath = filepath
-        self.drones_count: int = 0
-        self.hubs: list[dict] = []
-        self.connections: list[dict] = []
+        self.nb_drones = 0
+        self.hubs: list[dict[str, Any]] = []
+        self.connections: list[dict[str, str]] = []
         self._start_node_found = False
         self._end_node_found = False
 
-    def parse(self) -> None:
-        """It reads the file line by line and fills in the internal data."""
+    def parse(self) -> dict[str, Any]:
+        """Read the map file and return a structured representation."""
         try:
-            with open(self.filepath, 'r') as file:
+            with open(self.filepath, "r", encoding="utf-8") as file:
                 for line_num, line in enumerate(file, 1):
                     clean_line = line.strip()
-                    if not clean_line or clean_line.startswith('#'):
+                    if not clean_line or clean_line.startswith("#"):
                         continue
                     self._parse_line(clean_line, line_num)
-            self._validade_final_state()
-        except FileNotFoundError:
-            print(f"Error: File {self.filepath} not found.")
-            exit(1)
+            self._validate_final_state()
+        except FileNotFoundError as exc:
+            message = f"File {self.filepath} not found."
+            raise FileNotFoundError(message) from exc
+
+        return {
+            "nb_drones": self.nb_drones,
+            "hubs": self.hubs,
+            "connections": self.connections,
+            "start_hub": self._get_hub("start_hub"),
+            "end_hub": self._get_hub("end_hub"),
+        }
 
     def _parse_line(self, line: str, line_num: int) -> None:
-        """It identifies the row type and applies the corresponding Regex."""
-        # Validar primeira linha 'nb_drones'
+        """Identify the row type and apply the corresponding regex."""
         if self.nb_drones == 0:
             if match := re.match(r"^nb_drones:\s(?P<num>\d+)$", line):
                 self.nb_drones = int(match.group("num"))
                 return
-            self._raise_error(line_num, "The first line must be 'nb_drones'")
+            self._raise_error(
+                line_num,
+                "The first line must be 'nb_drones'",
+            )
 
-        # padroes de hub
-        if any(line.startswith(p) for p in ["hub:", "start_hub:", "end_hub:"]):
+        if (
+            line.startswith(prefix)
+            for prefix in ["hub:", "start_hub:", "end_hub:"]
+        ):
             if match := HUB_PATTERN.match(line):
-                data = match.groupdict()
-                self._handle_hub_data(data, line_num)
+                self._handle_hub_data(match.groupdict(), line_num)
                 return
 
-        # tentar padrao de conexao
         if line.startswith("connection:"):
             if match := CONN_PATTERN.match(line):
-                self.connections.append(match.groupdict())
+                self.connections.append(
+                    {
+                        "src": match.group("src"),
+                        "dst": match.group("dst"),
+                    }
+                )
                 return
 
         self._raise_error(
-            line_num, f"Invalid syntax or unknown command:{line}")
+            line_num,
+            f"Invalid syntax or unknown command: {line}",
+        )
+
+    def _handle_hub_data(self, data: dict[str, Any], line_num: int) -> None:
+        hub_type = data.get("type", "hub")
+        metadata = self.extract_metadata(str(data.get("meta", "")))
+        self.validate_allowed_keys(metadata)
+
+        if hub_type == "start_hub":
+            if self._start_node_found:
+                self._raise_error(line_num, "Duplicate start_hub declaration")
+            self._start_node_found = True
+        elif hub_type == "end_hub":
+            if self._end_node_found:
+                self._raise_error(line_num, "Duplicate end_hub declaration")
+            self._end_node_found = True
+
+        hub_data: dict[str, Any] = {
+            "name": data.get("name"),
+            "x": int(data.get("x", 0)),
+            "y": int(data.get("y", 0)),
+            "type": hub_type,
+        }
+
+        max_drones = metadata.get("max_drones")
+        if max_drones is not None:
+            hub_data["max_drones"] = self.validate_positive_int(
+                max_drones,
+                "max_drones",
+                line_num,
+            )
+        else:
+            hub_data["max_drones"] = 1
+
+        if "color" in metadata:
+            hub_data["color"] = metadata["color"]
+
+        self.hubs.append(hub_data)
 
     def _validate_final_state(self) -> None:
-        # Validar inicio e fim
         if not self._start_node_found or not self._end_node_found:
             self._raise_error(
-                0, "Map must exactly one 'start_hub' and one 'end_hub'")
+                0,
+                "Map must exactly one 'start_hub' and one 'end_hub'",
+            )
 
-        hub_names = {h['name'] for h in self.hubs}
-        for conn in self.connections:
-            if conn['src'] not in hub_names or conn['dst'] not in hub_names:
+        hub_names = {hub["name"] for hub in self.hubs}
+        for connection in self.connections:
+            if (
+                connection["src"] not in hub_names
+                or connection["dst"] not in hub_names
+            ):
                 self._raise_error(
-                    0, f"Connection {conn['src']}-{conn['dst']} \
-                        reference an undefined hub")
+                    0,
+                    f"Connection {connection['src']}-{connection['dst']} "
+                    "references an undefined hub",
+                )
 
         if self.nb_drones <= 0:
             self._raise_error(1, "Number of drones must be a positive integer")
 
-    def extract_metadata(meta_string: str) -> dict[str, str]:
-        """Transform metadata in a dict and extract metadata.
-        No metter the order of the tags."""
+    def _get_hub(self, hub_type: str) -> dict[str, Any] | None:
+        for hub in self.hubs:
+            if hub.get("type") == hub_type:
+                return hub
+        return None
+
+    def extract_metadata(self, meta_string: str) -> dict[str, str]:
+        """Transform metadata into a dictionary."""
         if not meta_string:
             return {}
 
-        # Padrao para capturar chave=valor
-        tag_pattern = re.compile(r'(\w+)=([^- \s\[\]]+)')
-
-        # re.findall retorna uma lista de tuplas
+        tag_pattern = re.compile(r"(\w+)=([^\s\[\]]+)")
         matches = tag_pattern.findall(meta_string)
-
         return dict(matches)
 
-    def validate_allowed_keys(meta_string: dict[str, str]) -> None:
-        for key in ALLOWED_HUB_TAGS:
-            if key not in meta_string:
-                raise KeyError(f"Missing required key: {key}")
+    def validate_allowed_keys(self, meta_string: dict[str, str]) -> None:
+        for key in meta_string:
+            if key not in ALLOWED_HUB_TAGS:
+                raise KeyError(f"Unsupported hub tag: {key}")
 
     def validate_positive_int(
-            value_str: str,
-            field_name: str,
-            line_num: int) -> int:
-        """Make the validation for integers"""
+        self,
+        value_str: str,
+        field_name: str,
+        line_num: int,
+    ) -> int:
+        """Validate an integer value."""
         try:
             value = int(value_str)
             if value <= 0:
                 raise ValueError("Must be positive")
             return value
-        except ValueError:
-            print(
-                f"Parsing Error (line {line_num}): {field_name} '{value_str}' \
-                is Invalid. Cause: Must be a positive integer.")
-            exit(1)
+        except ValueError as exc:
+            message = (
+                f"Parsing Error (line {line_num}): {field_name} "
+                f"'{value_str}' is invalid. Cause: Must be a positive integer."
+            )
+            raise ValueError(message) from exc
 
     def _raise_error(self, line_num: int, cause: str) -> None:
-        """It interrupts execution and displays the error."""
+        """Interrupt execution and display the error."""
         location = f"line {line_num}" if line_num > 0 else "end of file"
-        print(f"Parsing Error ({location}): {cause}")
-        exit(1)
+        raise ValueError(f"Parsing Error ({location}): {cause}")
