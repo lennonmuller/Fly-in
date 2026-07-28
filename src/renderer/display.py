@@ -27,35 +27,65 @@ class Renderer:
 
     def __init__(
         self,
-        width: int = 1000,
-        height: int = 700,
-        fps: int = 8,
+        width: int = 1200,  # Aumentei um pouco para caber o HUD lateral confortavelmente
+        height: int = 800,
+        fps: int = 30,      # Aumentamos o FPS interno para animações fluidas no futuro
     ) -> None:
         self.width = width
         self.height = height
         self.fps = fps
-        self.mid_x = width / 2
-        self.mid_y = height / 2
+        
+        # --- SISTEMA DE CÂMERA ---
         self.zoom = 1.0
-        self.scale = 150
-        self.radius = 60
+        self.camera_x = 0.0
+        self.camera_y = 0.0
+        self.world_scale = 100 # Distância base em pixels entre um nó e outro
+        self.is_camera_initialized = False
+        
+        self.radius = 25
         self._pygame_available = pygame is not None
         self._screen: Any | None = None
         self._clock: Any | None = None
         self._font: Any | None = None
         self._font_small: Any | None = None
+        self._font_title: Any | None = None
+        
         self._running = True
-        self._turn = 0
         self.auto_play = False
         self.step_requested = False
+        self.step_back_requested = False
 
         if self._pygame_available:
             pygame.init()
             self._screen = pygame.display.set_mode((self.width, self.height))
-            pygame.display.set_caption("Fly-in Simulation")
+            pygame.display.set_caption("Fly-in: Advanced Telemetry")
             self._clock = pygame.time.Clock()
-            self._font = pygame.font.SysFont("arial", 24)
-            self._font_small = pygame.font.SysFont("arial", 18)
+            self._font_title = pygame.font.SysFont("segoeui", 32, bold=True)
+            self._font = pygame.font.SysFont("segoeui", 24)
+            self._font_small = pygame.font.SysFont("segoeui", 14)
+
+    def _world_to_screen(self, wx: float, wy: float) -> tuple[int, int]:
+        """Projeta coordenadas do Mundo 2D para a Tela (Camera System)."""
+        # Centraliza baseado na posição da câmera e aplica o zoom
+        sx = (wx - self.camera_x) * self.zoom + (self.width / 2)
+        sy = (wy - self.camera_y) * self.zoom + (self.height / 2)
+        return int(sx), int(sy)
+
+    def _init_camera(self, graph: Any) -> None:
+        """Centraliza a câmera no meio do mapa no primeiro frame."""
+        if self.is_camera_initialized or not graph.nodes:
+            return
+        
+        xs = [node.x for node in graph.nodes.values()]
+        ys = [node.y for node in graph.nodes.values()]
+        
+        # O centro do mundo é a média dos X e Y multiplicados pela escala
+        center_x = ((max(xs) + min(xs)) / 2) * self.world_scale
+        center_y = ((max(ys) + min(ys)) / 2) * self.world_scale
+        
+        self.camera_x = center_x
+        self.camera_y = center_y
+        self.is_camera_initialized = True
 
     def render_turn(self, movements: list[dict[str, object]]) -> None:
         """Print a line representing a turn of the simulation."""
@@ -86,8 +116,9 @@ class Renderer:
         graph: Any,
         drones: list[Drone],
         moves: list[dict[str, object]] | None = None,
+        current_turn: int = 0, # <-- BUG 1 RESOLVIDO: Motor envia o turno real
     ) -> None:
-        """Render the current simulation state to a pygame window."""
+        """Renderiza a simulação separando World e HUD."""
         if not self._pygame_available or self._screen is None:
             return
 
@@ -95,11 +126,18 @@ class Renderer:
         if not self._running:
             return
 
-        self._screen.fill((15, 15, 25))
+        self._init_camera(graph)
+
+        self._screen.fill((15, 20, 25)) # Fundo Dark
+        
+        # 1. WORLD LAYER (Sujeito à câmera)
         self.draw_connections(graph)
         self.draw_hubs(graph)
         self.draw_drones(graph, drones)
-        self.draw_info(moves)
+        
+        # 2. HUD / UI LAYER (Absoluto na tela)
+        self.draw_hud(current_turn, moves)
+        
         pygame.display.flip()
         if self._clock is not None:
             self._clock.tick(self.fps)
@@ -123,87 +161,136 @@ class Renderer:
                     self.auto_play = not self.auto_play  # Liga/Desliga o play automático
                 if event.key == pygame.K_RIGHT:
                     self.step_requested = True
+                if event.key == pygame.K_LEFT:
+                    self.step_back_requested = True
+                    self.auto_play = False
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 4:
                     self.zoom *= 1.1
                 elif event.button == 5:
                     self.zoom /= 1.1
 
-    def wait_for_step(self) -> None:
+    def wait_for_step_and_get_delta(self, graph: Any, drones: list[Drone], current_turn: int) -> int:
+        """Trava a execução, renderiza e retorna +1 (avança) ou -1 (volta)."""
         if not self._pygame_available:
-            return
-
+            return 1 # Fallback para terminal puro
+            
         while self._running:
-            self.handle_events()
-
-            if self.auto_play or self.step_requested:
+            # Mantém a tela viva e a câmera funcional
+            self.render_state(graph, drones, [], current_turn)
+            
+            if self.auto_play:
+                return 1
+            if self.step_requested:
                 self.step_requested = False
-                break
-
-            if self._clock:
-                self._clock.tick(30)
+                return 1
+            if self.step_back_requested:
+                self.step_back_requested = False
+                return -1
+        return 0
 
     def draw_connections(self, graph: Any) -> None:
-        """Draw the edges between hubs."""
+        """Draw the edges between hubs using the camera projection."""
         if self._screen is None:
             return
 
-        positions = self._compute_positions(graph)
-
         for node_name, neighbors in graph.adj.items():
+            node_u = graph.nodes[node_name]
+            # Converte a coordenada real para o tamanho do Mundo
+            wx_u = node_u.x * self.world_scale
+            wy_u = node_u.y * self.world_scale
+            # Projeta na tela baseada na câmera
+            sx_u, sy_u = self._world_to_screen(wx_u, wy_u)
+
             for neighbor in neighbors:
+                # Desenha cada aresta apenas uma vez (evita redesenhar ida e volta)
                 if node_name >= neighbor.destination:
                     continue
-                start = positions[node_name]
-                end = positions[neighbor.destination]
-                x1 = start[0] * self.zoom
-                y1 = start[1] * self.zoom
-                x2 = end[0] * self.zoom
-                y2 = end[1] * self.zoom
-                pygame.draw.line(
-                    self._screen,
-                    (90, 110, 150),
-                    (x1, y1),
-                    (x2, y2),
-                    3,
-                )
+                    
+                node_v = graph.nodes[neighbor.destination]
+                wx_v = node_v.x * self.world_scale
+                wy_v = node_v.y * self.world_scale
+                sx_v, sy_v = self._world_to_screen(wx_v, wy_v)
+
+                # A espessura da linha escala com o zoom (mínimo de 1 pixel)
+                line_width = max(1, int(3 * self.zoom))
+                pygame.draw.line(self._screen, (90, 110, 150), (sx_u, sy_u), (sx_v, sy_v), line_width)
+
+    def _draw_node_shape(
+        self, 
+        color: tuple[int, int, int], 
+        sx: int, 
+        sy: int, 
+        rad: int, 
+        node_type: str
+    ) -> None:
+        """Desenha a forma geométrica correspondente ao tipo de zona."""
+        border_color = (220, 220, 220)
+        border_width = max(1, int(3 * self.zoom))
+
+        if node_type == "restricted":
+            # Quadrado
+            rect = pygame.Rect(sx - rad, sy - rad, rad * 2, rad * 2)
+            pygame.draw.rect(self._screen, color, rect)
+            pygame.draw.rect(self._screen, border_color, rect, border_width)
+            
+        elif node_type == "priority":
+            # Losango / Diamante
+            points = [
+                (sx, sy - rad - 5), # Topo mais esticado
+                (sx + rad + 5, sy), # Direita
+                (sx, sy + rad + 5), # Baixo
+                (sx - rad - 5, sy)  # Esquerda
+            ]
+            pygame.draw.polygon(self._screen, color, points)
+            pygame.draw.polygon(self._screen, border_color, points, border_width)
+            
+        else:
+            # Círculo (Normal, Start, End)
+            pygame.draw.circle(self._screen, color, (sx, sy), rad)
+            pygame.draw.circle(self._screen, border_color, (sx, sy), rad, border_width)
+            
+            # Start e End ganham uma aura pulsante / anel extra
+            if node_type in ("start_hub", "end_hub"):
+                extra_rad = rad + int(6 * self.zoom)
+                pygame.draw.circle(self._screen, (255, 255, 255), (sx, sy), extra_rad, width=2)
 
     def draw_hubs(self, graph: Any) -> None:
-        """Draw the map hubs and their labels."""
+        """Draw the map hubs and their labels matching real coordinates."""
         font = self._font
         if self._screen is None or font is None:
             return
 
-        positions = self._compute_positions(graph)
-        for node_name, (x_pos, y_pos) in positions.items():
-            node = graph.nodes[node_name]
+        for node in graph.nodes.values():
             color = self._color_for_node(node)
-            x_draw = int(x_pos * self.zoom)
-            y_draw = int(y_pos * self.zoom)
-            radius = int(self.radius * self.zoom)
+            wx = node.x * self.world_scale
+            wy = node.y * self.world_scale
+            sx, sy = self._world_to_screen(wx, wy)
+            
+            rad = int(self.radius * self.zoom)
+            
+            # Só desenha se tiver um tamanho visível para não causar erro no Pygame
+            if rad > 0:
+                self._draw_node_shape(color, sx, sy, rad, node.type)
 
-            pygame.draw.circle(self._screen, color, (x_draw, y_draw), radius)
-            pygame.draw.circle(
-                self._screen,
-                (220, 220, 220),
-                (x_draw, y_draw),
-                radius,
-                width=3,
-            )
-
-            label = font.render(node_name, True, (255, 255, 255))
-            self._screen.blit(
-                label,
-                (x_draw + radius + 5, y_draw - radius // 2),
-            )
+            # O Texto com fundo preto translúcido para leitura perfeita
+            label = font.render(node.name, True, (255, 255, 255))
+            
+            # Posição do texto sempre abaixo do nó, independente do zoom
+            text_x = sx - (label.get_width() // 2)
+            text_y = sy + rad + 5
+            
+            # Desenha uma sombrinha preta atrás do texto para não misturar com as linhas
+            bg_rect = pygame.Rect(text_x - 2, text_y - 2, label.get_width() + 4, label.get_height() + 4)
+            pygame.draw.rect(self._screen, (20, 20, 20, 180), bg_rect, border_radius=3)
+            self._screen.blit(label, (text_x, text_y))
 
     def draw_drones(self, graph: Any, drones: list[Drone]) -> None:
-        """Draw the drones positioned on the map with visual offsets."""
+        """Draw the drones, handling offsets and restricted zones."""
         font = self._font_small
         if self._screen is None or font is None:
             return
 
-        positions = self._compute_positions(graph)
         occupancy_count: dict[str, int] = {}
 
         for drone in drones:
@@ -212,83 +299,93 @@ class Renderer:
             except ValueError:
                 continue
 
-            # Lógica para mostrar o drone no meio da aresta (zona restrita)
+            # Identifica a coordenada Mundo (wx, wy) do Drone
             if "-" in hub_name:
-                u, v = hub_name.split("-")
-                pos_u = positions.get(u)
-                pos_v = positions.get(v)
-                if pos_u and pos_v:
-                    base_x = (pos_u[0] + pos_v[0]) / 2
-                    base_y = (pos_u[1] + pos_v[1]) / 2
-                    base_pos = (base_x, base_y)
+                # Se for zona restrita, o drone está exatamente no meio da aresta
+                u_name, v_name = hub_name.split("-")
+                node_u = graph.nodes.get(u_name)
+                node_v = graph.nodes.get(v_name)
+                if node_u and node_v:
+                    wx = ((node_u.x + node_v.x) / 2) * self.world_scale
+                    wy = ((node_u.y + node_v.y) / 2) * self.world_scale
                 else:
                     continue
             else:
-                base_pos = positions.get(hub_name)  # type: ignore
+                # Drone está num hub normal
+                node = graph.nodes.get(hub_name)
+                if node:
+                    wx = node.x * self.world_scale
+                    wy = node.y * self.world_scale
+                else:
+                    continue
 
-            if not base_pos:
-                continue
-
-            # Calcula offset para quando há múltiplos drones no mesmo lugar
+            # Lógica de Grid para múltiplos drones no mesmo local não se sobreporem
             count = occupancy_count.get(hub_name, 0)
             occupancy_count[hub_name] = count + 1
+            
+            # O grid (espalhamento) dos drones também acompanha o zoom
+            offset_step = 16 * self.zoom
+            offset_x_drone = (count % 3) * offset_step - offset_step
+            offset_y_drone = (count // 3) * offset_step - offset_step
 
-            # Espalha os drones num formato de grid ao redor do centro do nó
-            offset_x_drone = (count % 3) * 16 - 16
-            offset_y_drone = (count // 3) * 16 - 16
+            # Projeta para a Tela
+            sx, sy = self._world_to_screen(wx, wy)
+            
+            # Aplica o espaçamento do grid no espaço da tela
+            sx_draw = int(sx + offset_x_drone)
+            sy_draw = int(sy + offset_y_drone)
 
-            x_draw = int(base_pos[0] * self.zoom + offset_x_drone)
-            y_draw = int(base_pos[1] * self.zoom + offset_y_drone)
-
-            pygame.draw.circle(self._screen, (255, 255, 255), (x_draw, y_draw), 8)
+            drone_rad = max(2, int(8 * self.zoom))
+            pygame.draw.circle(self._screen, (255, 255, 255), (sx_draw, sy_draw), drone_rad)
+            
+            # Tag com nome do drone
             label = font.render(drone.name, True, (0, 0, 0), (255, 255, 255))
-            self._screen.blit(label, (x_draw + 10, y_draw - 10))
+            self._screen.blit(label, (sx_draw + drone_rad + 2, sy_draw - drone_rad - 2))
 
-    def wait_for_exit(self, graph: Any, drones: list[Drone]) -> None:
-        """Segura a tela aberta após o fim da simulação renderizando o estado final."""
+    def wait_for_exit(self, graph: Any, drones: list[Drone], current_turn: int = 0) -> None:
+        """Segura a tela aberta após o fim da simulação."""
         if not self._pygame_available:
             return
-
+        
+        # Mostra o status verde no final
         self.message("\nSimulation Complete! Close the window to exit.", "green")
         while self._running:
-            # Chama o render_state no loop infinito para o SO não "apagar" a janela
-            self.render_state(graph, drones, [])
+            # Continua passando o último turno para o HUD não bugar no fim
+            self.render_state(graph, drones, [], current_turn)
 
-    def draw_info(self, moves: list[dict[str, object]] | None) -> None:
-        """Draw the simulation information panel."""
-        font = self._font_small
-        if self._screen is None or font is None:
+    def draw_hud(self, current_turn: int, moves: list[dict[str, object]] | None) -> None:
+        """Desenha a interface fixada no lado direito, imune ao zoom."""
+        font_title = self._font_title
+        font = self._font
+        font_small = self._font_small
+        if self._screen is None or font is None or font_small is None or font_title is None:
             return
 
-        turn_text = font.render(
-            f"Turn {self._turn}",
-            True,
-            (255, 255, 255),
-        )
-        self._screen.blit(turn_text, (self.width - 220, 20))
+        # Fundo semi-transparente para o painel lateral
+        panel_rect = pygame.Surface((250, self.height), pygame.SRCALPHA)
+        panel_rect.fill((10, 10, 15, 200))
+        self._screen.blit(panel_rect, (self.width - 250, 0))
+
+        # Textos fixos (HUD)
+        turn_text = font_title.render(f"TURN {current_turn}", True, (255, 255, 255))
+        self._screen.blit(turn_text, (self.width - 230, 30))
 
         play_state = "PLAYING" if self.auto_play else "PAUSED"
         color_state = (100, 255, 100) if self.auto_play else (255, 100, 100)
         status_text = font.render(f"Status: {play_state}", True, color_state)
-        self._screen.blit(status_text, (self.width - 220, 50))
+        self._screen.blit(status_text, (self.width - 230, 80))
 
         info_lines = [
-            "Quit (q)",
-            "Zoom (mouse wheel)",
-            "Advance (right arrow)",
-            "Auto step (space)",
+            "CONTROLS:",
+            "[Q] Quit",
+            "[SPACE] Auto-play",
+            "[RIGHT] Step Forward",
+            "[LEFT] Step Backward",
+            "[WHEEL] Zoom Camera",
         ]
         for idx, line in enumerate(info_lines):
-            label = font.render(line, True, (220, 220, 220))
-            self._screen.blit(label, (self.width - 220, 70 + idx * 24))
-
-        if moves:
-            summary = font.render(
-                f"Moves: {len(moves)}",
-                True,
-                (180, 230, 120),
-            )
-            self._screen.blit(summary, (self.width - 220, 170))
+            label = font_small.render(line, True, (180, 180, 180))
+            self._screen.blit(label, (self.width - 230, 150 + idx * 25))
 
     def render_line(self, line: str) -> None:
         """Print a ready-to-display simulation line."""
@@ -302,6 +399,33 @@ class Renderer:
             pygame.quit()
 
     def _color_for_node(self, node: Any) -> tuple[int, int, int]:
+        """Defines the node color based on the [color=...] tag or its type."""
+        color_map = {
+            "red": (255, 70, 70),
+            "green": (70, 220, 70),
+            "blue": (70, 130, 255),
+            "yellow": (255, 220, 50),
+            "orange": (255, 150, 0),
+            "purple": (150, 70, 200),
+            "cyan": (70, 220, 255),
+            "magenta": (255, 50, 255),
+            "black": (60, 60, 60),
+            "brown": (140, 70, 20),
+            "maroon": (128, 0, 0),
+            "gold": (255, 215, 0),
+            "darkred": (140, 0, 0),
+            "violet": (238, 130, 238),
+            "crimson": (220, 20, 60),
+            "lime": (50, 255, 50),
+            "gray": (150, 150, 150)
+        }
+        if hasattr(node, "color") and node.color:
+            color_name = str(node.color).lower()
+            if color_name in color_map:
+                return color_map[color_name]
+            if color_name == "rainbow":
+                return (255, 255, 255)
+
         if node.type == "start_hub":
             return (80, 220, 255)
         if node.type == "end_hub":

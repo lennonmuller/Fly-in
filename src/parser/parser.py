@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from constants import ALLOWED_HUB_TAGS, CONN_PATTERN, HUB_PATTERN
+from constants import ALLOWED_HUB_TAGS, CONN_PATTERN, HUB_PATTERN, ALLOWED_CONN_TAGS
 
 
 class Parser:
@@ -53,17 +53,32 @@ class Parser:
         if (
             line.startswith(prefix)
             for prefix in ["hub:", "start_hub:", "end_hub:"]
-        ):
-            if match := HUB_PATTERN.match(line):
-                self._handle_hub_data(match.groupdict(), line_num)
-                return
+        ) and (match := HUB_PATTERN.match(line)):
+            self._handle_hub_data(match.groupdict(), line_num)
+            return
 
         if line.startswith("connection:"):
             if match := CONN_PATTERN.match(line):
+                meta_str = str(match.group("meta") or "")
+                metadata = self.extract_metadata(meta_str)
+
+                for key in metadata:
+                    if key not in ALLOWED_CONN_TAGS:
+                        self._raise_error(line_num, f"Unsupported connection tag: {key}")
+
+                link_cap = 1
+                if "max_link_capacity" in metadata:
+                    link_cap = self.validate_positive_int(
+                        metadata["max_link_capacity"],
+                        "max_link_capacity",
+                        line_num
+                    )
+
                 self.connections.append(
                     {
                         "src": match.group("src"),
                         "dst": match.group("dst"),
+                        "max_link_capacity": link_cap
                     }
                 )
                 return
@@ -86,6 +101,8 @@ class Parser:
             if self._end_node_found:
                 self._raise_error(line_num, "Duplicate end_hub declaration")
             self._end_node_found = True
+        elif hub_type == "hub":
+            hub_type = metadata.get("zone", "normal")
 
         hub_data: dict[str, Any] = {
             "name": data.get("name"),

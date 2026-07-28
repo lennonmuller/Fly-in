@@ -33,7 +33,7 @@ class Graph:
                 Edge(
                     source=str(connection["src"]),
                     destination=str(connection["dst"]),
-                    max_link_capacity=1,
+                    max_link_capacity=int(connection.get("max_link_capacity", 1)),
                 )
             )
 

@@ -33,3 +33,4 @@ CONN_PATTERN = re.compile(
 )
 
 ALLOWED_HUB_TAGS = ["zone", "color", "max_drones"]
+ALLOWED_CONN_TAGS = ["max_link_capacity"]

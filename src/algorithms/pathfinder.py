@@ -36,7 +36,7 @@ class PathFinder:
             # Acao 1: ESPERAR
             # Fica no mesmo nó até o próximo turno, se houver capacidade.
             if self.reservation.get_node_occupancy(u, t + 1) < self.graph.get_node_capacity(u):
-                new_cost = current_cost + 1.0
+                new_cost = current_cost + 1
                 if new_cost < distances.get((u, t + 1), float("inf")):
                     distances[(u, t + 1)] = new_cost
                     predecessors[(u, t + 1)] = (u, t, [u])

@@ -12,22 +12,27 @@ class Scheduler:
     def __init__(self, graph: Graph):
         self.graph = graph
 
-    def get_moves_for_turn(self, active_drones: list[Drone]) -> list[dict[str, object]]:
-        """Lê a fita de movimentos e retorna apenas quem se moveu de verdade."""
+    def get_moves_for_turn(self, drones: list[Drone], target_turn: int) -> list[dict[str, object]]:
+        """Lê a fita de movimentos e retorna apenas quem se moveu no turno exato."""
+        if target_turn == 0:
+            return [] # No turno 0 ninguém se moveu, eles acabaram de nascer
+            
         moves: list[dict[str, object]] = []
 
-        for drone in sorted(active_drones, key=lambda item: item.id):
-            if drone.current_index + 1 < len(drone.path):
-                curr_loc = drone.path[drone.current_index]
-                next_loc = drone.path[drone.current_index + 1]
+        for drone in sorted(drones, key=lambda item: item.id):
+            # Se o turno alvo existir na fita de gravação deste drone
+            if target_turn < len(drone.path):
+                prev_loc = drone.path[target_turn - 1]
+                curr_loc = drone.path[target_turn]
 
-                if curr_loc != next_loc:
-                    node = self.graph.nodes.get(next_loc)
+                # Se ele andou (não ficou parado fazendo Wait)
+                if prev_loc != curr_loc:
+                    node = self.graph.nodes.get(curr_loc)
                     color = node.color if node else "white"
 
                     moves.append({
                         "drone": drone,
-                        "target": next_loc,
+                        "target": curr_loc,
                         "color": color
                     })
 

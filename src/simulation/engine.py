@@ -24,35 +24,50 @@ class Simulator:
         self.turn_count = 0
 
     def run(self) -> None:
-        """Executa a simulação até todos os drones serem entregues."""
+        """Executa a simulação atuando como um Navegador do Tempo."""
+        # Descobre qual é o turno máximo onde o último drone chega ao destino
+        max_turn = max((len(d.path) - 1 for d in self.all_drones), default=0)
+        
+        self.turn_count = 0
+        max_reached_turn = 0  # Controle para não floodar o terminal ao fazer rewind
 
-        # 1. Renderiza o mapa com os drones na saída antes de fazer qualquer coisa
-        self.renderer.render_state(self.graph, self.all_drones, [])
+        # O loop agora é eterno, ditado pelo usuário ou auto_play
+        while self.renderer._running:
+            
+            # Sincroniza a posição atual de TODOS os drones para o turno exato
+            for drone in self.all_drones:
+                # O índice é travado no fim da rota se o tempo passar do limite dele
+                drone.current_index = min(self.turn_count, len(drone.path) - 1)
 
-        while self.active_drones:
-            # 2. TRAVA a execução aqui esperando o ESPAÇO ou SETA DIREITA
-            self.renderer.wait_for_step()
-            if not self.renderer._running:  # Se fechar a janela enquanto pausado, sai limpo
-                break
+            # Extrai os movimentos deste turno para pintar no HUD (Opcional)
+            moves = self.scheduler.get_moves_for_turn(self.all_drones, self.turn_count)
+            
+            # --- TERMINAL (PDF Strict Rule) ---
+            # Se avançamos para um turno no futuro inédito, printamos no terminal
+            if self.turn_count > max_reached_turn:
+                self._process_terminal_output(moves)
+                max_reached_turn = self.turn_count
 
-            moves = self.scheduler.get_moves_for_turn(self.active_drones)
-            self._process_terminal_output(moves)
+            # Renderiza o estado exato
+            self.renderer.render_state(
+                self.graph, self.all_drones, moves, current_turn=self.turn_count
+            )
 
-            for drone in self.active_drones:
-                if drone.current_index + 1 < len(drone.path):
-                    drone.current_index += 1
+            # Se chegamos ao fim do filme, desliga o auto-play (mas deixa a tela aberta)
+            if self.turn_count >= max_turn and self.renderer.auto_play:
+                self.renderer.auto_play = False
 
-            self.active_drones = [
-                drone for drone in self.active_drones
-                if drone.current_location != self.graph.end_hub
-            ]
-
-            self.turn_count += 1
-
-            # 3. Desenha o novo estado e volta para o início do while
-            self.renderer.render_state(self.graph, self.all_drones, moves)
-
-        self.renderer.wait_for_exit(self.graph, self.all_drones)
+            # Trava o tempo e aguarda a decisão do usuário (+1, -1 ou 0)
+            delta = self.renderer.wait_for_step_and_get_delta(
+                self.graph, self.all_drones, self.turn_count
+            )
+            
+            # Aplica o paradoxo temporal!
+            self.turn_count += delta
+            
+            # Proteções contraa antes de 0 e depois de max
+            self.turn_count = max(self.turn_count, 0)
+            self.turn_count = min(self.turn_count, max_turn)
 
     def _process_terminal_output(self, moves: list[dict[str, object]]) -> None:
         """Apply the authorized moves for the current turn."""
