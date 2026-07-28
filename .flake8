@@ -1,2 +1,8 @@
 [flake8]
-exclude = venv
+exclude =
+    exclude =
+    .git,
+    __pycache__,
+    .venv,
+    .mypy_cache,
+max-line-length = 120

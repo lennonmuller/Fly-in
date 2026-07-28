@@ -4,6 +4,7 @@ import sys
 
 from algorithms.pathfinder import PathFinder
 from graph.graph_manager import Graph
+from graph.reservation import ReservationTable
 from models.drone import Drone
 from parser.parser import Parser
 from renderer.display import Renderer
@@ -30,7 +31,8 @@ def main() -> None:
                 "The map must define a start and an end hub"
             )
 
-        pathfinder = PathFinder(graph)
+        reservation = ReservationTable()
+        pathfinder = PathFinder(graph, reservation)
 
         drones: list[Drone] = []
 
@@ -42,7 +44,7 @@ def main() -> None:
 
             if not path:
                 raise ValueError(
-                    "No path found between start and end hub"
+                    f"No path found for Drone {drone_id} (traffic deadlock)"
                 )
 
             drones.append(
@@ -69,7 +71,7 @@ def main() -> None:
             renderer.handle_events()
 
             if simulation_running:
-                simulation_running = engine.step()
+                simulation_running = engine.run()
 
             renderer.render_state(
                 graph=graph,

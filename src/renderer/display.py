@@ -8,7 +8,7 @@ from models.drone import Drone
 try:
     import pygame
 except ImportError:  # pragma: no cover - depends on runtime environment
-    pygame = None
+    pygame = None  # type: ignore
 
 
 class Renderer:
@@ -46,6 +46,8 @@ class Renderer:
         self._font_small: Any | None = None
         self._running = True
         self._turn = 0
+        self.auto_play = False
+        self.step_requested = False
 
         if self._pygame_available:
             pygame.init()
@@ -118,24 +120,34 @@ class Renderer:
                     pygame.quit()
                     sys.exit(0)
                 if event.key == pygame.K_SPACE:
-                    self._turn += 1
+                    self.auto_play = not self.auto_play  # Liga/Desliga o play automático
                 if event.key == pygame.K_RIGHT:
-                    self._turn += 1
-                if event.key == pygame.K_LEFT:
-                    self._turn = max(0, self._turn - 1)
+                    self.step_requested = True
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 4:
                     self.zoom *= 1.1
                 elif event.button == 5:
                     self.zoom /= 1.1
 
+    def wait_for_step(self) -> None:
+        if not self._pygame_available:
+            return
+
+        while self._running:
+            self.handle_events()
+
+            if self.auto_play or self.step_requested:
+                self.step_requested = False
+                break
+
+            if self._clock:
+                self._clock.tick(30)
+
     def draw_connections(self, graph: Any) -> None:
         """Draw the edges between hubs."""
         if self._screen is None:
             return
 
-        offset_x = self.mid_x // 4
-        offset_y = self.mid_y
         positions = self._compute_positions(graph)
 
         for node_name, neighbors in graph.adj.items():
@@ -144,10 +156,10 @@ class Renderer:
                     continue
                 start = positions[node_name]
                 end = positions[neighbor.destination]
-                x1 = start[0] * self.zoom + offset_x
-                y1 = start[1] * self.zoom + offset_y
-                x2 = end[0] * self.zoom + offset_x
-                y2 = end[1] * self.zoom + offset_y
+                x1 = start[0] * self.zoom
+                y1 = start[1] * self.zoom
+                x2 = end[0] * self.zoom
+                y2 = end[1] * self.zoom
                 pygame.draw.line(
                     self._screen,
                     (90, 110, 150),
@@ -158,18 +170,16 @@ class Renderer:
 
     def draw_hubs(self, graph: Any) -> None:
         """Draw the map hubs and their labels."""
-        if self._screen is None or self._font is None:
+        font = self._font
+        if self._screen is None or font is None:
             return
 
         positions = self._compute_positions(graph)
-        offset_x = self.mid_x // 4
-        offset_y = self.mid_y
-
         for node_name, (x_pos, y_pos) in positions.items():
             node = graph.nodes[node_name]
             color = self._color_for_node(node)
-            x_draw = int(x_pos * self.zoom + offset_x)
-            y_draw = int(y_pos * self.zoom + offset_y)
+            x_draw = int(x_pos * self.zoom)
+            y_draw = int(y_pos * self.zoom)
             radius = int(self.radius * self.zoom)
 
             pygame.draw.circle(self._screen, color, (x_draw, y_draw), radius)
@@ -181,49 +191,86 @@ class Renderer:
                 width=3,
             )
 
-            label = self._font.render(node_name, True, (255, 255, 255))
+            label = font.render(node_name, True, (255, 255, 255))
             self._screen.blit(
                 label,
                 (x_draw + radius + 5, y_draw - radius // 2),
             )
 
     def draw_drones(self, graph: Any, drones: list[Drone]) -> None:
-        """Draw the drones positioned on the map."""
-        if self._screen is None or self._font_small is None:
+        """Draw the drones positioned on the map with visual offsets."""
+        font = self._font_small
+        if self._screen is None or font is None:
             return
 
         positions = self._compute_positions(graph)
-        offset_x = self.mid_x // 4
-        offset_y = self.mid_y
+        occupancy_count: dict[str, int] = {}
 
         for drone in drones:
-            hub_name = drone.path[drone.current_index]
-            center = positions.get(hub_name)
-            if center is None:
+            try:
+                hub_name = drone.current_location
+            except ValueError:
                 continue
 
-            x_draw = int(center[0] * self.zoom + offset_x)
-            y_draw = int(center[1] * self.zoom + offset_y)
-            pygame.draw.circle(
-                self._screen,
-                (255, 255, 255),
-                (x_draw, y_draw),
-                8,
-            )
-            label = self._font_small.render(drone.name, True, (255, 255, 255))
-            self._screen.blit(label, (x_draw + 8, y_draw - 8))
+            # Lógica para mostrar o drone no meio da aresta (zona restrita)
+            if "-" in hub_name:
+                u, v = hub_name.split("-")
+                pos_u = positions.get(u)
+                pos_v = positions.get(v)
+                if pos_u and pos_v:
+                    base_x = (pos_u[0] + pos_v[0]) / 2
+                    base_y = (pos_u[1] + pos_v[1]) / 2
+                    base_pos = (base_x, base_y)
+                else:
+                    continue
+            else:
+                base_pos = positions.get(hub_name)  # type: ignore
+
+            if not base_pos:
+                continue
+
+            # Calcula offset para quando há múltiplos drones no mesmo lugar
+            count = occupancy_count.get(hub_name, 0)
+            occupancy_count[hub_name] = count + 1
+
+            # Espalha os drones num formato de grid ao redor do centro do nó
+            offset_x_drone = (count % 3) * 16 - 16
+            offset_y_drone = (count // 3) * 16 - 16
+
+            x_draw = int(base_pos[0] * self.zoom + offset_x_drone)
+            y_draw = int(base_pos[1] * self.zoom + offset_y_drone)
+
+            pygame.draw.circle(self._screen, (255, 255, 255), (x_draw, y_draw), 8)
+            label = font.render(drone.name, True, (0, 0, 0), (255, 255, 255))
+            self._screen.blit(label, (x_draw + 10, y_draw - 10))
+
+    def wait_for_exit(self, graph: Any, drones: list[Drone]) -> None:
+        """Segura a tela aberta após o fim da simulação renderizando o estado final."""
+        if not self._pygame_available:
+            return
+
+        self.message("\nSimulation Complete! Close the window to exit.", "green")
+        while self._running:
+            # Chama o render_state no loop infinito para o SO não "apagar" a janela
+            self.render_state(graph, drones, [])
 
     def draw_info(self, moves: list[dict[str, object]] | None) -> None:
         """Draw the simulation information panel."""
-        if self._screen is None or self._font_small is None:
+        font = self._font_small
+        if self._screen is None or font is None:
             return
 
-        turn_text = self._font.render(
+        turn_text = font.render(
             f"Turn {self._turn}",
             True,
             (255, 255, 255),
         )
         self._screen.blit(turn_text, (self.width - 220, 20))
+
+        play_state = "PLAYING" if self.auto_play else "PAUSED"
+        color_state = (100, 255, 100) if self.auto_play else (255, 100, 100)
+        status_text = font.render(f"Status: {play_state}", True, color_state)
+        self._screen.blit(status_text, (self.width - 220, 50))
 
         info_lines = [
             "Quit (q)",
@@ -232,11 +279,11 @@ class Renderer:
             "Auto step (space)",
         ]
         for idx, line in enumerate(info_lines):
-            label = self._font_small.render(line, True, (220, 220, 220))
+            label = font.render(line, True, (220, 220, 220))
             self._screen.blit(label, (self.width - 220, 70 + idx * 24))
 
         if moves:
-            summary = self._font_small.render(
+            summary = font.render(
                 f"Moves: {len(moves)}",
                 True,
                 (180, 230, 120),

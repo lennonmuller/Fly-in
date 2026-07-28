@@ -33,7 +33,7 @@ class ReservationTable:
     def get_edge_occupancy(self, src: str, dst: str, turn: int) -> int:
         """Returns how many drones will be using this connection this shift."""
         u, v = sorted([src, dst])
-        return self._edge_occupancy((u, v, turn), 0)
+        return self._edge_occupancy.get((u, v, turn), 0)
 
     def clean(self) -> None:
         """Clers the reserve table"""
