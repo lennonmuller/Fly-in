@@ -116,7 +116,9 @@ class Renderer:
         graph: Any,
         drones: list[Drone],
         moves: list[dict[str, object]] | None = None,
-        current_turn: int = 0, # <-- BUG 1 RESOLVIDO: Motor envia o turno real
+        current_turn: int = 0,
+        anim_progress: float = 0.0,
+        anim_delta: int = 0
     ) -> None:
         """Renderiza a simulação separando World e HUD."""
         if not self._pygame_available or self._screen is None:
@@ -130,12 +132,10 @@ class Renderer:
 
         self._screen.fill((15, 20, 25)) # Fundo Dark
         
-        # 1. WORLD LAYER (Sujeito à câmera)
         self.draw_connections(graph)
         self.draw_hubs(graph)
-        self.draw_drones(graph, drones)
+        self.draw_drones(graph, drones, current_turn, anim_progress, anim_delta)
         
-        # 2. HUD / UI LAYER (Absoluto na tela)
         self.draw_hud(current_turn, moves)
         
         pygame.display.flip()
@@ -171,22 +171,42 @@ class Renderer:
                     self.zoom /= 1.1
 
     def wait_for_step_and_get_delta(self, graph: Any, drones: list[Drone], current_turn: int) -> int:
-        """Trava a execução, renderiza e retorna +1 (avança) ou -1 (volta)."""
+        """Trava a execução esperando input, e dispara a animação quando avança/volta."""
         if not self._pygame_available:
-            return 1 # Fallback para terminal puro
-            
+            return 1 # Fallback pro terminal puro
+
+        target_delta = 0
+
         while self._running:
-            # Mantém a tela viva e a câmera funcional
-            self.render_state(graph, drones, [], current_turn)
-            
+            self.handle_events()
+
+            # Checa se precisamos avançar o tempo
             if self.auto_play:
-                return 1
-            if self.step_requested:
+                target_delta = 1
+            elif self.step_requested:
                 self.step_requested = False
-                return 1
-            if self.step_back_requested:
+                target_delta = 1
+            elif self.step_back_requested:
                 self.step_back_requested = False
-                return -1
+                target_delta = -1
+
+            if target_delta != 0:
+                # O TEMPO VAI MUDAR! GERA A ANIMAÇÃO!
+                progress = 0.0
+                anim_speed = 0.15 # Quanto maior, mais rápida a animação (ex: 0.15 = ~7 frames)
+
+                while progress < 1.0 and self._running:
+                    self.handle_events() # Mantém zoom e janela responsivos
+                    self.render_state(
+                        graph, drones, [], current_turn, 
+                        anim_progress=progress, anim_delta=target_delta
+                    )
+                    progress += anim_speed
+
+                return target_delta # Acabou a animação, libera o Motor!
+
+            self.render_state(graph, drones, [], current_turn)
+
         return 0
 
     def draw_connections(self, graph: Any) -> None:
@@ -285,62 +305,64 @@ class Renderer:
             pygame.draw.rect(self._screen, (20, 20, 20, 180), bg_rect, border_radius=3)
             self._screen.blit(label, (text_x, text_y))
 
-    def draw_drones(self, graph: Any, drones: list[Drone]) -> None:
-        """Draw the drones, handling offsets and restricted zones."""
+    def draw_drones(
+        self, graph: Any, drones: list[Drone], 
+        current_turn: int, anim_progress: float, anim_delta: int
+    ) -> None:
+        """Draws drones using LERP for fluid motion animation and grid collision."""
         font = self._font_small
         if self._screen is None or font is None:
             return
 
-        occupancy_count: dict[str, int] = {}
+        start_counts: dict[str, int] = {}
+        end_counts: dict[str, int] = {}
 
         for drone in drones:
-            try:
-                hub_name = drone.current_location
-            except ValueError:
+            # Trava com segurança o índice para não dar IndexError no passado ou futuro
+            idx_start = max(0, min(current_turn, len(drone.path) - 1))
+            idx_end = max(0, min(current_turn + anim_delta, len(drone.path) - 1))
+
+            loc_start = drone.path[idx_start]
+            loc_end = drone.path[idx_end]
+
+            c_start = self._get_world_coords(loc_start, graph)
+            c_end = self._get_world_coords(loc_end, graph)
+            if not c_start or not c_end:
                 continue
 
-            # Identifica a coordenada Mundo (wx, wy) do Drone
-            if "-" in hub_name:
-                # Se for zona restrita, o drone está exatamente no meio da aresta
-                u_name, v_name = hub_name.split("-")
-                node_u = graph.nodes.get(u_name)
-                node_v = graph.nodes.get(v_name)
-                if node_u and node_v:
-                    wx = ((node_u.x + node_v.x) / 2) * self.world_scale
-                    wy = ((node_u.y + node_v.y) / 2) * self.world_scale
-                else:
-                    continue
-            else:
-                # Drone está num hub normal
-                node = graph.nodes.get(hub_name)
-                if node:
-                    wx = node.x * self.world_scale
-                    wy = node.y * self.world_scale
-                else:
-                    continue
-
-            # Lógica de Grid para múltiplos drones no mesmo local não se sobreporem
-            count = occupancy_count.get(hub_name, 0)
-            occupancy_count[hub_name] = count + 1
+            # Calcula a grade de espaçamento na Origem e no Destino
+            count_start = start_counts.get(loc_start, 0)
+            start_counts[loc_start] = count_start + 1
             
-            # O grid (espalhamento) dos drones também acompanha o zoom
+            count_end = end_counts.get(loc_end, 0)
+            end_counts[loc_end] = count_end + 1
+
             offset_step = 16 * self.zoom
-            offset_x_drone = (count % 3) * offset_step - offset_step
-            offset_y_drone = (count // 3) * offset_step - offset_step
+            ox_start = (count_start % 3) * offset_step - offset_step
+            oy_start = (count_start // 3) * offset_step - offset_step
 
-            # Projeta para a Tela
-            sx, sy = self._world_to_screen(wx, wy)
-            
-            # Aplica o espaçamento do grid no espaço da tela
-            sx_draw = int(sx + offset_x_drone)
-            sy_draw = int(sy + offset_y_drone)
+            ox_end = (count_end % 3) * offset_step - offset_step
+            oy_end = (count_end // 3) * offset_step - offset_step
+
+            # Projeta na Tela
+            sx_start, sy_start = self._world_to_screen(c_start[0], c_start[1])
+            sx_end, sy_end = self._world_to_screen(c_end[0], c_end[1])
+
+            # Aplica os offsets
+            sx_start += ox_start
+            sy_start += oy_start
+            sx_end += ox_end
+            sy_end += oy_end
+
+            # A MÁGICA DO LERP AQUI!
+            sx = sx_start + (sx_end - sx_start) * anim_progress
+            sy = sy_start + (sy_end - sy_start) * anim_progress
 
             drone_rad = max(2, int(8 * self.zoom))
-            pygame.draw.circle(self._screen, (255, 255, 255), (sx_draw, sy_draw), drone_rad)
+            pygame.draw.circle(self._screen, (255, 255, 255), (int(sx), int(sy)), drone_rad)
             
-            # Tag com nome do drone
             label = font.render(drone.name, True, (0, 0, 0), (255, 255, 255))
-            self._screen.blit(label, (sx_draw + drone_rad + 2, sy_draw - drone_rad - 2))
+            self._screen.blit(label, (int(sx) + drone_rad + 2, int(sy) - drone_rad - 2))
 
     def wait_for_exit(self, graph: Any, drones: list[Drone], current_turn: int = 0) -> None:
         """Segura a tela aberta após o fim da simulação."""
@@ -461,3 +483,20 @@ class Renderer:
     @property
     def running(self) -> bool:
         return self._running
+
+    def _get_world_coords(self, loc: str, graph: Any) -> tuple[float, float] | None:
+        """Decodes a route string into real world coordinates."""
+        if "-" in loc:
+            u, v = loc.split("-")
+            n_u, n_v = graph.nodes.get(u), graph.nodes.get(v)
+            if n_u and n_v:
+                return (
+                    ((n_u.x + n_v.x) / 2) * self.world_scale,
+                    ((n_u.y + n_v.y) / 2) * self.world_scale
+                )
+        else:
+            node = graph.nodes.get(loc)
+            if node:
+                return (node.x * self.world_scale, node.y * self.world_scale)
+        return None
+
