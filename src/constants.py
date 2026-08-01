@@ -1,6 +1,5 @@
 import re
 
-
 # Padrao para hub: name x y [metadata]
 HUB_PATTERN = re.compile(
     r"""

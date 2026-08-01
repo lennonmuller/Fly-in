@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import Any, ClassVar
 
 from models.drone import Drone
@@ -49,7 +50,9 @@ class Renderer:
         self._font: Any | None = None
         self._font_small: Any | None = None
         self._font_title: Any | None = None
-        
+
+        assets = Path(__file__).resolve().parent.parent.parent / "assets"
+
         self._running = True
         self.auto_play = False
         self.step_requested = False
@@ -63,6 +66,40 @@ class Renderer:
             self._font_title = pygame.font.SysFont("segoeui", 32, bold=True)
             self._font = pygame.font.SysFont("segoeui", 24)
             self._font_small = pygame.font.SysFont("segoeui", 14)
+
+        self.bg_img = None
+        self.drone_img = None
+        self.base_drone_size = 45
+        
+        self.bg_img = self._load_image(
+            str(assets / "destroyed-city.jpg"),
+            alpha=False,
+        )
+        if self.bg_img:
+            self.bg_img = pygame.transform.scale(
+                self.bg_img,
+                (self.width, self.height),
+            )
+        
+        self.drone_img = self._load_image(
+            str(assets / "supermissel.gif"),
+            )
+
+
+    def _load_image(self, path: str, alpha: bool = True):
+        try:
+            image = pygame.image.load(path)
+
+            if alpha:
+                image = image.convert_alpha()
+            else:
+                image = image.convert()
+            return image
+
+        except Exception as e:
+            print(f"[ERROR] Failed to load {path}")
+            print(e)
+            return None
 
     def _world_to_screen(self, wx: float, wy: float) -> tuple[int, int]:
         """Projeta coordenadas do Mundo 2D para a Tela (Camera System)."""
@@ -130,7 +167,10 @@ class Renderer:
 
         self._init_camera(graph)
 
-        self._screen.fill((15, 20, 25)) # Fundo Dark
+        if self.bg_img:
+            self._screen.blit(self.bg_img, (0, 0))
+        else:
+            self._screen.fill((15, 20, 25))
         
         self.draw_connections(graph)
         self.draw_hubs(graph)
@@ -358,11 +398,27 @@ class Renderer:
             sx = sx_start + (sx_end - sx_start) * anim_progress
             sy = sy_start + (sy_end - sy_start) * anim_progress
 
-            drone_rad = max(2, int(8 * self.zoom))
-            pygame.draw.circle(self._screen, (255, 255, 255), (int(sx), int(sy)), drone_rad)
+            # SE TEMOS A IMAGEM DO DRONE:
+            if self.drone_img:
+                # Escala a imagem baseada no zoom atual da câmera
+                scaled_size = max(8, int(self.base_drone_size * self.zoom))
+                scaled_img = pygame.transform.scale(self.drone_img, (scaled_size, scaled_size))
+                
+                # Centraliza a imagem no ponto exato (sx, sy)
+                img_rect = scaled_img.get_rect(center=(int(sx), int(sy)))
+                self._screen.blit(scaled_img, img_rect)
+                
+                # Tag com nome do drone
+                label = font.render(drone.name, True, (0, 0, 0), (255, 255, 255))
+                self._screen.blit(label, (int(sx) + (scaled_size//2), int(sy) - (scaled_size//2) - 10))
             
-            label = font.render(drone.name, True, (0, 0, 0), (255, 255, 255))
-            self._screen.blit(label, (int(sx) + drone_rad + 2, int(sy) - drone_rad - 2))
+            # SE NÃO TEMOS A IMAGEM (FALLBACK DE SEGURANÇA):
+            else:
+                drone_rad = max(2, int(8 * self.zoom))
+                pygame.draw.circle(self._screen, (255, 255, 255), (int(sx), int(sy)), drone_rad)
+                
+                label = font.render(drone.name, True, (0, 0, 0), (255, 255, 255))
+                self._screen.blit(label, (int(sx) + drone_rad + 2, int(sy) - drone_rad - 2))
 
     def wait_for_exit(self, graph: Any, drones: list[Drone], current_turn: int = 0) -> None:
         """Segura a tela aberta após o fim da simulação."""
