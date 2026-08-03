@@ -27,13 +27,13 @@ class Simulator:
         """Executa a simulação atuando como um Navegador do Tempo."""
         # Descobre qual é o turno máximo onde o último drone chega ao destino
         max_turn = max((len(d.path) - 1 for d in self.all_drones), default=0)
-        
+
         self.turn_count = 0
         max_reached_turn = 0  # Controle para não floodar o terminal ao fazer rewind
 
         # O loop agora é eterno, ditado pelo usuário ou auto_play
         while self.renderer._running:
-            
+
             # Sincroniza a posição atual de TODOS os drones para o turno exato
             for drone in self.all_drones:
                 # O índice é travado no fim da rota se o tempo passar do limite dele
@@ -41,7 +41,7 @@ class Simulator:
 
             # Extrai os movimentos deste turno para pintar no HUD (Opcional)
             moves = self.scheduler.get_moves_for_turn(self.all_drones, self.turn_count)
-            
+
             # --- TERMINAL (PDF Strict Rule) ---
             # Se avançamos para um turno no futuro inédito, printamos no terminal
             if self.turn_count > max_reached_turn:
@@ -61,10 +61,10 @@ class Simulator:
             delta = self.renderer.wait_for_step_and_get_delta(
                 self.graph, self.all_drones, self.turn_count
             )
-            
+
             # Aplica o paradoxo temporal!
             self.turn_count += delta
-            
+
             # Proteções contraa antes de 0 e depois de max
             self.turn_count = max(self.turn_count, 0)
             self.turn_count = min(self.turn_count, max_turn)

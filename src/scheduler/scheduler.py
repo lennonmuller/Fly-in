@@ -15,8 +15,8 @@ class Scheduler:
     def get_moves_for_turn(self, drones: list[Drone], target_turn: int) -> list[dict[str, object]]:
         """Lê a fita de movimentos e retorna apenas quem se moveu no turno exato."""
         if target_turn == 0:
-            return [] # No turno 0 ninguém se moveu, eles acabaram de nascer
-            
+            return []  # No turno 0 ninguém se moveu, eles acabaram de nascer
+
         moves: list[dict[str, object]] = []
 
         for drone in sorted(drones, key=lambda item: item.id):

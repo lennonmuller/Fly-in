@@ -7,9 +7,9 @@ from typing import Any, ClassVar
 from models.drone import Drone
 
 try:
-    import pygame
-except ImportError:  # pragma: no cover - depends on runtime environment
-    pygame = None  # type: ignore
+    import pygame  # type: ignore
+except ImportError:
+    pygame = None
 
 
 class Renderer:
@@ -35,14 +35,14 @@ class Renderer:
         self.width = width
         self.height = height
         self.fps = fps
-        
+
         # --- SISTEMA DE CÂMERA ---
         self.zoom = 1.0
         self.camera_x = 0.0
         self.camera_y = 0.0
-        self.world_scale = 100 # Distância base em pixels entre um nó e outro
+        self.world_scale = 100  # Distância base em pixels entre um nó e outro
         self.is_camera_initialized = False
-        
+
         self.radius = 25
         self._pygame_available = pygame is not None
         self._screen: Any | None = None
@@ -61,7 +61,7 @@ class Renderer:
         if self._pygame_available:
             pygame.init()
             self._screen = pygame.display.set_mode((self.width, self.height))
-            pygame.display.set_caption("Fly-in: Advanced Telemetry")
+            pygame.display.set_caption("Fly-in")
             self._clock = pygame.time.Clock()
             self._font_title = pygame.font.SysFont("segoeui", 32, bold=True)
             self._font = pygame.font.SysFont("segoeui", 24)
@@ -70,9 +70,9 @@ class Renderer:
         self.bg_img = None
         self.drone_img = None
         self.base_drone_size = 45
-        
+
         self.bg_img = self._load_image(
-            str(assets / "destroyed-city.jpg"),
+            str(assets / "background.jpg"),
             alpha=False,
         )
         if self.bg_img:
@@ -80,11 +80,10 @@ class Renderer:
                 self.bg_img,
                 (self.width, self.height),
             )
-        
-        self.drone_img = self._load_image(
-            str(assets / "supermissel.gif"),
-            )
 
+        self.drone_img = self._load_image(
+            str(assets / "drone.png"),
+            )
 
     def _load_image(self, path: str, alpha: bool = True):
         try:
@@ -112,14 +111,14 @@ class Renderer:
         """Centraliza a câmera no meio do mapa no primeiro frame."""
         if self.is_camera_initialized or not graph.nodes:
             return
-        
+
         xs = [node.x for node in graph.nodes.values()]
         ys = [node.y for node in graph.nodes.values()]
-        
+
         # O centro do mundo é a média dos X e Y multiplicados pela escala
         center_x = ((max(xs) + min(xs)) / 2) * self.world_scale
         center_y = ((max(ys) + min(ys)) / 2) * self.world_scale
-        
+
         self.camera_x = center_x
         self.camera_y = center_y
         self.is_camera_initialized = True
@@ -171,13 +170,13 @@ class Renderer:
             self._screen.blit(self.bg_img, (0, 0))
         else:
             self._screen.fill((15, 20, 25))
-        
+
         self.draw_connections(graph)
         self.draw_hubs(graph)
         self.draw_drones(graph, drones, current_turn, anim_progress, anim_delta)
-        
+
         self.draw_hud(current_turn, moves)
-        
+
         pygame.display.flip()
         if self._clock is not None:
             self._clock.tick(self.fps)
@@ -213,7 +212,7 @@ class Renderer:
     def wait_for_step_and_get_delta(self, graph: Any, drones: list[Drone], current_turn: int) -> int:
         """Trava a execução esperando input, e dispara a animação quando avança/volta."""
         if not self._pygame_available:
-            return 1 # Fallback pro terminal puro
+            return 1  # Fallback pro terminal puro
 
         target_delta = 0
 
@@ -233,17 +232,17 @@ class Renderer:
             if target_delta != 0:
                 # O TEMPO VAI MUDAR! GERA A ANIMAÇÃO!
                 progress = 0.0
-                anim_speed = 0.15 # Quanto maior, mais rápida a animação (ex: 0.15 = ~7 frames)
+                anim_speed = 0.15  # Quanto maior, mais rápida a animação (ex: 0.15 = ~7 frames)
 
                 while progress < 1.0 and self._running:
-                    self.handle_events() # Mantém zoom e janela responsivos
+                    self.handle_events()  # Mantém zoom e janela responsivos
                     self.render_state(
-                        graph, drones, [], current_turn, 
+                        graph, drones, [], current_turn,
                         anim_progress=progress, anim_delta=target_delta
                     )
                     progress += anim_speed
 
-                return target_delta # Acabou a animação, libera o Motor!
+                return target_delta  # Acabou a animação, libera o Motor!
 
             self.render_state(graph, drones, [], current_turn)
 
@@ -266,7 +265,7 @@ class Renderer:
                 # Desenha cada aresta apenas uma vez (evita redesenhar ida e volta)
                 if node_name >= neighbor.destination:
                     continue
-                    
+
                 node_v = graph.nodes[neighbor.destination]
                 wx_v = node_v.x * self.world_scale
                 wy_v = node_v.y * self.world_scale
@@ -277,11 +276,11 @@ class Renderer:
                 pygame.draw.line(self._screen, (90, 110, 150), (sx_u, sy_u), (sx_v, sy_v), line_width)
 
     def _draw_node_shape(
-        self, 
-        color: tuple[int, int, int], 
-        sx: int, 
-        sy: int, 
-        rad: int, 
+        self,
+        color: tuple[int, int, int],
+        sx: int,
+        sy: int,
+        rad: int,
         node_type: str
     ) -> None:
         """Desenha a forma geométrica correspondente ao tipo de zona."""
@@ -293,23 +292,23 @@ class Renderer:
             rect = pygame.Rect(sx - rad, sy - rad, rad * 2, rad * 2)
             pygame.draw.rect(self._screen, color, rect)
             pygame.draw.rect(self._screen, border_color, rect, border_width)
-            
+
         elif node_type == "priority":
             # Losango / Diamante
             points = [
-                (sx, sy - rad - 5), # Topo mais esticado
-                (sx + rad + 5, sy), # Direita
-                (sx, sy + rad + 5), # Baixo
+                (sx, sy - rad - 5),  # Topo mais esticado
+                (sx + rad + 5, sy),  # Direita
+                (sx, sy + rad + 5),  # Baixo
                 (sx - rad - 5, sy)  # Esquerda
             ]
             pygame.draw.polygon(self._screen, color, points)
             pygame.draw.polygon(self._screen, border_color, points, border_width)
-            
+
         else:
             # Círculo (Normal, Start, End)
             pygame.draw.circle(self._screen, color, (sx, sy), rad)
             pygame.draw.circle(self._screen, border_color, (sx, sy), rad, border_width)
-            
+
             # Start e End ganham uma aura pulsante / anel extra
             if node_type in ("start_hub", "end_hub"):
                 extra_rad = rad + int(6 * self.zoom)
@@ -326,27 +325,27 @@ class Renderer:
             wx = node.x * self.world_scale
             wy = node.y * self.world_scale
             sx, sy = self._world_to_screen(wx, wy)
-            
+
             rad = int(self.radius * self.zoom)
-            
+
             # Só desenha se tiver um tamanho visível para não causar erro no Pygame
             if rad > 0:
                 self._draw_node_shape(color, sx, sy, rad, node.type)
 
             # O Texto com fundo preto translúcido para leitura perfeita
             label = font.render(node.name, True, (255, 255, 255))
-            
+
             # Posição do texto sempre abaixo do nó, independente do zoom
             text_x = sx - (label.get_width() // 2)
             text_y = sy + rad + 5
-            
+
             # Desenha uma sombrinha preta atrás do texto para não misturar com as linhas
             bg_rect = pygame.Rect(text_x - 2, text_y - 2, label.get_width() + 4, label.get_height() + 4)
             pygame.draw.rect(self._screen, (20, 20, 20, 180), bg_rect, border_radius=3)
             self._screen.blit(label, (text_x, text_y))
 
     def draw_drones(
-        self, graph: Any, drones: list[Drone], 
+        self, graph: Any, drones: list[Drone],
         current_turn: int, anim_progress: float, anim_delta: int
     ) -> None:
         """Draws drones using LERP for fluid motion animation and grid collision."""
@@ -373,7 +372,7 @@ class Renderer:
             # Calcula a grade de espaçamento na Origem e no Destino
             count_start = start_counts.get(loc_start, 0)
             start_counts[loc_start] = count_start + 1
-            
+
             count_end = end_counts.get(loc_end, 0)
             end_counts[loc_end] = count_end + 1
 
@@ -403,20 +402,20 @@ class Renderer:
                 # Escala a imagem baseada no zoom atual da câmera
                 scaled_size = max(8, int(self.base_drone_size * self.zoom))
                 scaled_img = pygame.transform.scale(self.drone_img, (scaled_size, scaled_size))
-                
+
                 # Centraliza a imagem no ponto exato (sx, sy)
                 img_rect = scaled_img.get_rect(center=(int(sx), int(sy)))
                 self._screen.blit(scaled_img, img_rect)
-                
+
                 # Tag com nome do drone
                 label = font.render(drone.name, True, (0, 0, 0), (255, 255, 255))
                 self._screen.blit(label, (int(sx) + (scaled_size//2), int(sy) - (scaled_size//2) - 10))
-            
+
             # SE NÃO TEMOS A IMAGEM (FALLBACK DE SEGURANÇA):
             else:
                 drone_rad = max(2, int(8 * self.zoom))
                 pygame.draw.circle(self._screen, (255, 255, 255), (int(sx), int(sy)), drone_rad)
-                
+
                 label = font.render(drone.name, True, (0, 0, 0), (255, 255, 255))
                 self._screen.blit(label, (int(sx) + drone_rad + 2, int(sy) - drone_rad - 2))
 
@@ -424,7 +423,7 @@ class Renderer:
         """Segura a tela aberta após o fim da simulação."""
         if not self._pygame_available:
             return
-        
+
         # Mostra o status verde no final
         self.message("\nSimulation Complete! Close the window to exit.", "green")
         while self._running:
@@ -555,4 +554,3 @@ class Renderer:
             if node:
                 return (node.x * self.world_scale, node.y * self.world_scale)
         return None
-
