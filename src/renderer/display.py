@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from models.drone import Drone
+from renderer.theme_manager import ThemeManager
 
 try:
     import pygame  # type: ignore
@@ -51,6 +52,7 @@ class Renderer:
         self._font: Any | None = None
         self._font_small: Any | None = None
         self._font_title: Any | None = None
+        self.theme_manager = ThemeManager()
 
         assets = Path(__file__).resolve().parent.parent.parent / "assets"
 
@@ -68,8 +70,8 @@ class Renderer:
             self._font = pygame.font.SysFont("segoeui", 24)
             self._font_small = pygame.font.SysFont("segoeui", 14)
 
-        self.bg_img = None
-        self.drone_img = None
+        self.bg_img: Any | None = None
+        self.drone_img: Any | None = None
         self.base_drone_size = 45
 
         self.bg_img = self._load_image(
@@ -167,6 +169,8 @@ class Renderer:
 
         self._init_camera(graph)
 
+        self.bg_img, self.drone_img = self.theme_manager.get_assets(self.width, self.height)
+
         if self.bg_img:
             self._screen.blit(self.bg_img, (0, 0))
         else:
@@ -182,26 +186,63 @@ class Renderer:
         if self._clock is not None:
             self._clock.tick(self.fps)
 
-    def render_menu(self) -> None:
-        """Renderiza a tela do Menu Principal."""
+    def render_menu(
+        self, title: str, options: list[str], cursor_idx: int, footer: str
+    ) -> None:
+        """Desenha a tela do Menu com a opção selecionada em destaque."""
         if not self._pygame_available or self._screen is None:
             return
 
-        self.handle_events()
-        self._screen.fill((20, 25, 35)) # Fundo limpo
+        self._screen.fill((20, 25, 35)) # Fundo limpo dark
         
-        if self._font_title and self._font:
-            # Título
-            title = self._font_title.render("FLY-IN: MAIN MENU", True, (255, 255, 255))
-            self._screen.blit(title, (self.width // 2 - title.get_width() // 2, self.height // 3))
+        if self._font_title and self._font and self._font_small:
+            # 1. Título
+            title_surf = self._font_title.render(title, True, (70, 220, 255))
+            self._screen.blit(title_surf, (self.width // 2 - title_surf.get_width() // 2, 100))
             
-            # Subtítulo / Instrução
-            subtitle = self._font.render("Press [ESC] or [Q] to Exit (Menu is under construction)", True, (150, 150, 150))
-            self._screen.blit(subtitle, (self.width // 2 - subtitle.get_width() // 2, self.height // 2))
+            # 2. Opções Dinâmicas (Navegação por Teclado)
+            start_y = 250
+            spacing = 40
+            
+            for i, option_text in enumerate(options):
+                if i == cursor_idx:
+                    # Opção Selecionada: Amarelo, Maior, com um ">" na frente
+                    text = f">  {option_text}  <"
+                    color = (255, 220, 50)
+                else:
+                    # Opção Inativa: Cinza Claro
+                    text = option_text
+                    color = (180, 180, 180)
+                    
+                opt_surf = self._font.render(text, True, color)
+                self._screen.blit(opt_surf, (self.width // 2 - opt_surf.get_width() // 2, start_y + i * spacing))
+            
+            # 3. Rodapé (Instruções)
+            footer_surf = self._font_small.render(footer, True, (100, 100, 100))
+            self._screen.blit(footer_surf, (self.width // 2 - footer_surf.get_width() // 2, self.height - 50))
 
         pygame.display.flip()
         if self._clock:
             self._clock.tick(self.fps)
+
+    def get_menu_action(self) -> str | None:
+        """Captura apenas as teclas de navegação do menu (Sem mouse)."""
+        if not self._pygame_available:
+            return None
+            
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return "QUIT"
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_UP:
+                    return "UP"
+                if event.key == pygame.K_DOWN:
+                    return "DOWN"
+                if event.key == pygame.K_RETURN:
+                    return "ENTER"
+                if event.key in (pygame.K_ESCAPE, pygame.K_q):
+                    return "QUIT"
+        return None
 
     def handle_events(self) -> None:
         """Process keyboard, mouse, and quit events."""
@@ -497,6 +538,7 @@ class Renderer:
             "[RIGHT] Step Forward",
             "[LEFT] Step Backward",
             "[WHEEL] Zoom Camera",
+            "[M] Back to Menu"
         ]
         for idx, line in enumerate(info_lines):
             label = font_small.render(line, True, (180, 180, 180))
