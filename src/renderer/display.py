@@ -70,6 +70,18 @@ class Renderer:
             self._font = pygame.font.SysFont("segoeui", 24)
             self._font_small = pygame.font.SysFont("segoeui", 14)
 
+        # Carregamento prévio do background do menu
+        self.bg_menu_img: Any | None = None
+        self.bg_menu_img = self._load_image(
+            str(assets / "bgmenu.png"),
+            alpha=False,
+        )
+        if self.bg_menu_img:
+            self.bg_menu_img = pygame.transform.scale(
+                self.bg_menu_img,
+                (self.width, self.height),
+            )
+        
         self.bg_img: Any | None = None
         self.drone_img: Any | None = None
         self.base_drone_size = 45
@@ -104,26 +116,48 @@ class Renderer:
             return None
 
     def _world_to_screen(self, wx: float, wy: float) -> tuple[int, int]:
-        """Projeta coordenadas do Mundo 2D para a Tela (Camera System)."""
-        # Centraliza baseado na posição da câmera e aplica o zoom
-        sx = (wx - self.camera_x) * self.zoom + (self.width / 2)
-        sy = (wy - self.camera_y) * self.zoom + (self.height / 2)
+        """Projeta coordenadas do Mundo 2D para a Tela (Camera System),
+        centralizando o grafo na área útil (à esquerda do HUD lateral de 250px)."""
+        viewport_center_x = (self.width - 250) / 2.0
+        viewport_center_y = self.height / 2.0
+
+        sx = (wx - self.camera_x) * self.zoom + viewport_center_x
+        sy = (wy - self.camera_y) * self.zoom + viewport_center_y
         return int(sx), int(sy)
 
     def _init_camera(self, graph: Any) -> None:
-        """Centraliza a câmera no meio do mapa no primeiro frame."""
+        """Calcula o Bounding Box do grafo e define o Zoom e Offset ideais (Auto-Fit)."""
         if self.is_camera_initialized or not graph.nodes:
             return
 
-        xs = [node.x for node in graph.nodes.values()]
-        ys = [node.y for node in graph.nodes.values()]
+        # 1. Extração das coordenadas no Espaço do Mundo
+        xs = [node.x * self.world_scale for node in graph.nodes.values()]
+        ys = [node.y * self.world_scale for node in graph.nodes.values()]
 
-        # O centro do mundo é a média dos X e Y multiplicados pela escala
-        center_x = ((max(xs) + min(xs)) / 2) * self.world_scale
-        center_y = ((max(ys) + min(ys)) / 2) * self.world_scale
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
 
-        self.camera_x = center_x
-        self.camera_y = center_y
+        # 2. Centro real do grafo no Espaço do Mundo
+        self.camera_x = (min_x + max_x) / 2.0
+        self.camera_y = (min_y + max_y) / 2.0
+
+        # 3. Dimensões do Grafo
+        graph_w = float(max_x - min_x)
+        graph_h = float(max_y - min_y)
+
+        # 4. Dimensões úteis da janela (descontando o HUD de 250px e margem de 100px)
+        padding = 100.0
+        usable_width = max(1.0, (self.width - 250) - (2 * padding))
+        usable_height = max(1.0, self.height - (2 * padding))
+
+        # 5. Cálculo do Zoom ideal
+        zoom_x = usable_width / graph_w if graph_w > 0 else 1.0
+        zoom_y = usable_height / graph_h if graph_h > 0 else 1.0
+
+        calculated_zoom = min(zoom_x, zoom_y)
+
+        # Clamping de segurança: previne zooms absurdos em mapas de nó único ou mapas gigantes
+        self.zoom = max(0.15, min(calculated_zoom, 1.5))
         self.is_camera_initialized = True
 
     def render_turn(self, movements: list[dict[str, object]]) -> None:
@@ -193,7 +227,10 @@ class Renderer:
         if not self._pygame_available or self._screen is None:
             return
 
-        self._screen.fill((20, 25, 35)) # Fundo limpo dark
+        if self.bg_menu_img:
+            self._screen.blit(self.bg_menu_img, (0, 0))
+        else:
+            self._screen.fill((20, 25, 35))
         
         if self._font_title and self._font and self._font_small:
             # 1. Título

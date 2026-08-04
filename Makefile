@@ -3,7 +3,7 @@ VENV = .venv
 BIN = $(VENV)/bin
 PIP = pip
 MAIN = src/main.py
-MAP = maps/easy/01_linear_path.txt
+MAP ?=
 
 install:
 	@test -d $(VENV) || $(PYTHON) -m venv $(VENV)
