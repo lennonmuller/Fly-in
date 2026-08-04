@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 from typing import Any, ClassVar
@@ -181,6 +182,27 @@ class Renderer:
         if self._clock is not None:
             self._clock.tick(self.fps)
 
+    def render_menu(self) -> None:
+        """Renderiza a tela do Menu Principal."""
+        if not self._pygame_available or self._screen is None:
+            return
+
+        self.handle_events()
+        self._screen.fill((20, 25, 35)) # Fundo limpo
+        
+        if self._font_title and self._font:
+            # Título
+            title = self._font_title.render("FLY-IN: MAIN MENU", True, (255, 255, 255))
+            self._screen.blit(title, (self.width // 2 - title.get_width() // 2, self.height // 3))
+            
+            # Subtítulo / Instrução
+            subtitle = self._font.render("Press [ESC] or [Q] to Exit (Menu is under construction)", True, (150, 150, 150))
+            self._screen.blit(subtitle, (self.width // 2 - subtitle.get_width() // 2, self.height // 2))
+
+        pygame.display.flip()
+        if self._clock:
+            self._clock.tick(self.fps)
+
     def handle_events(self) -> None:
         """Process keyboard, mouse, and quit events."""
         if not self._pygame_available:
@@ -218,6 +240,10 @@ class Renderer:
 
         while self._running:
             self.handle_events()
+
+            keys = pygame.key.get_pressed()
+            if keys[pygame.K_m]:
+                return -99
 
             # Checa se precisamos avançar o tempo
             if self.auto_play:
@@ -315,34 +341,46 @@ class Renderer:
                 pygame.draw.circle(self._screen, (255, 255, 255), (sx, sy), extra_rad, width=2)
 
     def draw_hubs(self, graph: Any) -> None:
-        """Draw the map hubs and their labels matching real coordinates."""
-        font = self._font
+        """Desenha os hubs com texto de tamanho fixo e inteligência de visibilidade."""
+        # Usamos uma fonte fixa (não escala com o zoom)
+        font = self._font_small 
         if self._screen is None or font is None:
             return
 
         for node in graph.nodes.values():
-            color = self._color_for_node(node)
-            wx = node.x * self.world_scale
-            wy = node.y * self.world_scale
+            # 1. Matemática de Projeção
+            wx, wy = node.x * self.world_scale, node.y * self.world_scale
             sx, sy = self._world_to_screen(wx, wy)
-
+            
+            # O raio do nó escala com o zoom, mas o texto NÃO.
             rad = int(self.radius * self.zoom)
-
-            # Só desenha se tiver um tamanho visível para não causar erro no Pygame
+            
+            # 2. Desenha a Forma (Shape) do Nó
             if rad > 0:
+                color = self._color_for_node(node)
                 self._draw_node_shape(color, sx, sy, rad, node.type)
 
-            # O Texto com fundo preto translúcido para leitura perfeita
-            label = font.render(node.name, True, (255, 255, 255))
-
-            # Posição do texto sempre abaixo do nó, independente do zoom
-            text_x = sx - (label.get_width() // 2)
-            text_y = sy + rad + 5
-
-            # Desenha uma sombrinha preta atrás do texto para não misturar com as linhas
-            bg_rect = pygame.Rect(text_x - 2, text_y - 2, label.get_width() + 4, label.get_height() + 4)
-            pygame.draw.rect(self._screen, (20, 20, 20, 180), bg_rect, border_radius=3)
-            self._screen.blit(label, (text_x, text_y))
+            # 3. Lógica de "Anti-Poluição" (LOD)
+            # Só desenha o nome se o zoom for suficiente para não embolar a tela
+            if self.zoom > 0.4:
+                # O texto mantém sempre o mesmo tamanho em pixels
+                display_name = node.name
+                # Abrevia apenas nomes extremos para manter a estética
+                if len(display_name) > 12:
+                    display_name = display_name[:10] + ".."
+                    
+                label = font.render(display_name, True, (255, 255, 255))
+                
+                # Centraliza o texto no ponto exato SX, SY (que se move com a câmera)
+                text_rect = label.get_rect(center=(sx, sy))
+                
+                # Só desenha o texto se ele couber (ou quase couber) dentro do nó
+                # Isso evita que o texto fique flutuando sobre um "pontinho" minúsculo
+                if rad > label.get_width() / 2.5:
+                    # Sombra sutil para leitura em qualquer fundo
+                    shadow = font.render(display_name, True, (20, 20, 20))
+                    self._screen.blit(shadow, (text_rect.x + 1, text_rect.y + 1))
+                    self._screen.blit(label, text_rect)
 
     def draw_drones(
         self, graph: Any, drones: list[Drone],
@@ -501,7 +539,15 @@ class Renderer:
             if color_name in color_map:
                 return color_map[color_name]
             if color_name == "rainbow":
-                return (255, 255, 255)
+                if not self._pygame_available:
+                    return (255, 255, 255)
+
+                time_ms = pygame.time.get_ticks()
+                # Cria ondas senoidais defasadas para R, G e B
+                r = int((math.sin(time_ms * 0.003) + 1) * 127.5)
+                g = int((math.sin(time_ms * 0.003 + 2.0) + 1) * 127.5)
+                b = int((math.sin(time_ms * 0.003 + 4.0) + 1) * 127.5)
+                return (r, g, b)
 
         if node.type == "start_hub":
             return (80, 220, 255)

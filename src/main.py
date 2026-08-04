@@ -2,93 +2,31 @@ from __future__ import annotations
 
 import sys
 
-from algorithms.pathfinder import PathFinder
-from graph.graph_manager import Graph
-from graph.reservation import ReservationTable
-from models.drone import Drone
-from parser.parser import Parser
-from renderer.display import Renderer
-from scheduler.scheduler import Scheduler
-from simulation.engine import Simulator
+from app import AppController
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
-        print("Usage: python3 src/main.py <map_file>")
+    """Ponto de entrada do sistema Fly-in."""
+    
+    # Validações de Live Coding (ex: --capacity-info) podem continuar aqui.
+    show_capacity = "--capacity-info" in sys.argv
+    if show_capacity:
+        sys.argv.remove("--capacity-info")
+        
+    map_file = None
+    if len(sys.argv) == 2:
+        map_file = sys.argv[1]
+    elif len(sys.argv) > 2:
+        print("Uso: python3 src/main.py [caminho_do_mapa.txt]")
         raise SystemExit(1)
 
-    renderer = Renderer()
-
     try:
-        parser = Parser(sys.argv[1])
-        data = parser.parse()
-
-        graph = Graph()
-        graph.build(data)
-
-        if graph.start_hub is None or graph.end_hub is None:
-            raise ValueError(
-                "The map must define a start and an end hub"
-            )
-
-        reservation = ReservationTable()
-        pathfinder = PathFinder(graph, reservation)
-
-        drones: list[Drone] = []
-
-        for drone_id in range(1, int(data["nb_drones"]) + 1):
-            path = pathfinder.get_path(
-                graph.start_hub,
-                graph.end_hub,
-            )
-
-            if not path:
-                raise ValueError(
-                    f"No path found for Drone {drone_id} (traffic deadlock)"
-                )
-
-            drones.append(
-                Drone(
-                    id=drone_id,
-                    path=path,
-                )
-            )
-
-        scheduler = Scheduler(graph)
-
-        # Novo construtor (Renderer não pertence mais ao Simulator)
-        engine = Simulator(
-            drones=drones,
-            scheduler=scheduler,
-            graph=graph,
-            renderer=renderer,
-        )
-
-        simulation_running = True
-
-        while renderer.running:
-
-            renderer.handle_events()
-
-            if simulation_running:
-                simulation_running = engine.run()
-
-            renderer.render_state(
-                graph=graph,
-                drones=engine.active_drones,
-            )
-
-    except (
-        FileNotFoundError,
-        KeyError,
-        ValueError,
-    ) as exc:
-        print(f"Error: {exc}")
+        # Inicia a Máquina de Estados
+        app = AppController(map_file)
+        app.run()
+    except Exception as exc:
+        print(f"Erro Fatal: {exc}")
         raise SystemExit(1) from exc
-
-    finally:
-        renderer.close()
-
 
 if __name__ == "__main__":
     main()
