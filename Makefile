@@ -32,8 +32,8 @@ lint:
 	@$(BIN)/mypy . --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs
 
 lint-strict:
-	@flake8 .
-	@mypy . --strict
+	@$(BIN)/flake8 .
+	@$(BIN)/mypy . --strict
 
 help:
 	@echo "Help Makefile Commands:"

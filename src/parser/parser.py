@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from constants import ALLOWED_HUB_TAGS, CONN_PATTERN, HUB_PATTERN, ALLOWED_CONN_TAGS
+from constants import ALLOWED_CONN_TAGS, ALLOWED_HUB_TAGS, CONN_PATTERN, HUB_PATTERN
 
 
 class Parser:
@@ -13,7 +13,7 @@ class Parser:
         self.filepath = filepath
         self.nb_drones = 0
         self.hubs: list[dict[str, Any]] = []
-        self.connections: list[dict[str, str]] = []
+        self.connections: list[dict[str, Any]] = []
         self._start_node_found = False
         self._end_node_found = False
 

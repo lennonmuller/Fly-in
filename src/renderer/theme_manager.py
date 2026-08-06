@@ -7,6 +7,7 @@ try:
 except ImportError:
     pygame = None  # type: ignore
 
+
 class ThemeManager:
     """Gerencia os assets visuais (Fundo e Sprites) garantindo fallbacks seguros."""
 

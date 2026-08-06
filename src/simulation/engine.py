@@ -31,12 +31,12 @@ class Simulator:
         # O loop continua enquanto o Pygame estiver aberto (renderer._running)
         # e a flag de saída para o menu (a ser implementada) não for acionada.
         while self.renderer._running:
-            
+
             for drone in self.all_drones:
                 drone.current_index = min(self.turn_count, len(drone.path) - 1)
 
             moves = self.scheduler.get_moves_for_turn(self.all_drones, self.turn_count)
-            
+
             if self.turn_count > max_reached_turn:
                 self._process_terminal_output(moves)
                 max_reached_turn = self.turn_count
@@ -51,7 +51,7 @@ class Simulator:
             delta = self.renderer.wait_for_step_and_get_delta(
                 self.graph, self.all_drones, self.turn_count
             )
-            
+
             # --- SAÍDA PARA O MENU ---
             # Se o botão de voltar ao menu for apertado, o wait_for_step_and_get_delta
             # pode nos devolver um código especial (ex: -99) para quebrar o loop.

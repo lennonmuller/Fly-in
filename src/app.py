@@ -17,7 +17,7 @@ class AppController:
         # FSM States: "MENU", "SIMULATION", "QUIT"
         self.state = "SIMULATION" if initial_map else "MENU"
         self.map_file = initial_map
-        
+
         # O Renderer é persistente. Sobrevive às transições de estado.
         self.renderer = Renderer()
 
@@ -40,7 +40,7 @@ class AppController:
         import pygame
         last_input_time = 0
         debounce_delay = 200
-        
+
         # Listas hardcoded para garantir que funcionem perfeitamente na avaliação
         maps_list = [
             "maps/easy/01_linear_path.txt",
@@ -55,7 +55,7 @@ class AppController:
             "maps/challenger/01_the_impossible_dream.txt"
         ]
         themes_list = ["Sky", "War", "TrainStation"]
-        
+
         # Para evitar crash caso o mapa passado por terminal não exista
         if self.map_file not in maps_list and self.map_file is not None:
             maps_list.insert(0, self.map_file)
@@ -69,7 +69,7 @@ class AppController:
                 options = [
                     "START SIMULATION",
                     f"Select Map: [{map_name}]",
-                    f"Select Theme: [{current_theme}]", 
+                    f"Select Theme: [{current_theme}]",
                     "Quit"
                 ]
             elif menu_view == "MAPS":
@@ -90,7 +90,7 @@ class AppController:
 
             if action and (current_time - last_input_time > debounce_delay):
                 last_input_time = current_time
-            
+
             if action == "QUIT":
                 self.state = "QUIT"
             elif action == "UP":
@@ -119,7 +119,7 @@ class AppController:
                     else:
                         self.map_file = maps_list[cursor]
                         menu_view = "MAIN"
-                        cursor = 0 # Foca no START após escolher o mapa
+                        cursor = 0  # Foca no START após escolher o mapa
 
                 elif menu_view == "THEMES":
                     if cursor == len(options) - 1:  # Back
@@ -137,6 +137,8 @@ class AppController:
             self.state = "MENU"
             return
 
+        self.renderer.reset_camera()
+
         print(f"Loading map: {self.map_file}")
         parser = Parser(self.map_file)
         data = parser.parse()
@@ -145,20 +147,20 @@ class AppController:
         graph.build(data)
 
         if graph.start_hub is None or graph.end_hub is None:
-            raise ValueError("O mapa deve definir start e end hub.")
+            raise ValueError("The map should define the start and end hub.")
 
         reservation = ReservationTable()
         pathfinder = PathFinder(graph, reservation)
-        
+
         drones: list[Drone] = []
         for drone_id in range(1, int(data["nb_drones"]) + 1):
             path = pathfinder.get_path(graph.start_hub, graph.end_hub)
             if not path:
-                raise ValueError("Nenhum caminho encontrado (deadlock de tráfego).")
+                raise ValueError("No path found (traffic deadlock).")
             drones.append(Drone(id=drone_id, path=path))
 
         scheduler = Scheduler(graph)
-        
+
         # Engine agora recebe tudo para rodar até acabar ou pedir pra sair
         engine = Simulator(drones, scheduler, self.renderer, graph)
         engine.run()
@@ -167,6 +169,6 @@ class AppController:
         # Se a janela não foi fechada no "X", voltamos pro Menu.
         if self.renderer._running:
             self.state = "MENU"
-            self.map_file = None # Reseta o mapa para forçar a escolha no menu
+            self.map_file = None  # Reseta o mapa para forçar a escolha no menu
         else:
             self.state = "QUIT"

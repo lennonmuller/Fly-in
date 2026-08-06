@@ -9,9 +9,11 @@ from models.drone import Drone
 from renderer.theme_manager import ThemeManager
 
 try:
-    import pygame  # type: ignore
+    import pygame
+    _PYGAME_AVAILABLE = True
 except ImportError:
-    pygame = None
+    pygame = None  # type: ignore[assignment]
+    _PYGAME_AVAILABLE = False
 
 
 class Renderer:
@@ -39,11 +41,11 @@ class Renderer:
         self.fps = fps
 
         # --- SISTEMA DE CÂMERA ---
-        self.zoom = 1.0
-        self.camera_x = 0.0
-        self.camera_y = 0.0
-        self.world_scale = 100  # Distância base em pixels entre um nó e outro
-        self.is_camera_initialized = False
+        self.zoom: float = 1.0
+        self.camera_x: float = 0.0
+        self.camera_y: float = 0.0
+        self.world_scale: float = 100.0  # Distância base em pixels entre um nó e outro
+        self.is_camera_initialized: bool = False
 
         self.radius = 25
         self._pygame_available = pygame is not None
@@ -81,7 +83,7 @@ class Renderer:
                 self.bg_menu_img,
                 (self.width, self.height),
             )
-        
+
         self.bg_img: Any | None = None
         self.drone_img: Any | None = None
         self.base_drone_size = 45
@@ -97,10 +99,9 @@ class Renderer:
             )
 
         self.drone_img = self._load_image(
-            str(assets / "drone.png"),
-            )
+            str(assets / "drone.png"),)
 
-    def _load_image(self, path: str, alpha: bool = True):
+    def _load_image(self, path: str, alpha: bool = True) -> Any | None:
         try:
             image = pygame.image.load(path)
 
@@ -115,7 +116,7 @@ class Renderer:
             print(e)
             return None
 
-    def _world_to_screen(self, wx: float, wy: float) -> tuple[int, int]:
+    def _world_to_screen(self, wx: float, wy: float) -> tuple[float, float]:
         """Projeta coordenadas do Mundo 2D para a Tela (Camera System),
         centralizando o grafo na área útil (à esquerda do HUD lateral de 250px)."""
         viewport_center_x = (self.width - 250) / 2.0
@@ -231,16 +232,16 @@ class Renderer:
             self._screen.blit(self.bg_menu_img, (0, 0))
         else:
             self._screen.fill((20, 25, 35))
-        
+
         if self._font_title and self._font and self._font_small:
             # 1. Título
             title_surf = self._font_title.render(title, True, (70, 220, 255))
             self._screen.blit(title_surf, (self.width // 2 - title_surf.get_width() // 2, 100))
-            
+
             # 2. Opções Dinâmicas (Navegação por Teclado)
             start_y = 250
             spacing = 40
-            
+
             for i, option_text in enumerate(options):
                 if i == cursor_idx:
                     # Opção Selecionada: Amarelo, Maior, com um ">" na frente
@@ -250,10 +251,10 @@ class Renderer:
                     # Opção Inativa: Cinza Claro
                     text = option_text
                     color = (180, 180, 180)
-                    
+
                 opt_surf = self._font.render(text, True, color)
                 self._screen.blit(opt_surf, (self.width // 2 - opt_surf.get_width() // 2, start_y + i * spacing))
-            
+
             # 3. Rodapé (Instruções)
             footer_surf = self._font_small.render(footer, True, (100, 100, 100))
             self._screen.blit(footer_surf, (self.width // 2 - footer_surf.get_width() // 2, self.height - 50))
@@ -266,7 +267,7 @@ class Renderer:
         """Captura apenas as teclas de navegação do menu (Sem mouse)."""
         if not self._pygame_available:
             return None
-            
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return "QUIT"
@@ -382,8 +383,8 @@ class Renderer:
     def _draw_node_shape(
         self,
         color: tuple[int, int, int],
-        sx: int,
-        sy: int,
+        sx: float,
+        sy: float,
         rad: int,
         node_type: str
     ) -> None:
@@ -394,8 +395,9 @@ class Renderer:
         if node_type == "restricted":
             # Quadrado
             rect = pygame.Rect(sx - rad, sy - rad, rad * 2, rad * 2)
-            pygame.draw.rect(self._screen, color, rect)
-            pygame.draw.rect(self._screen, border_color, rect, border_width)
+            if self._screen is not None:
+                pygame.draw.rect(self._screen, color, rect)
+                pygame.draw.rect(self._screen, border_color, rect, border_width)
 
         elif node_type == "priority":
             # Losango / Diamante
@@ -405,23 +407,26 @@ class Renderer:
                 (sx, sy + rad + 5),  # Baixo
                 (sx - rad - 5, sy)  # Esquerda
             ]
-            pygame.draw.polygon(self._screen, color, points)
-            pygame.draw.polygon(self._screen, border_color, points, border_width)
+            if self._screen is not None:
+                pygame.draw.polygon(self._screen, color, points)
+                pygame.draw.polygon(self._screen, border_color, points, border_width)
 
         else:
-            # Círculo (Normal, Start, End)
-            pygame.draw.circle(self._screen, color, (sx, sy), rad)
-            pygame.draw.circle(self._screen, border_color, (sx, sy), rad, border_width)
+            if self._screen is not None:
+                # Círculo (Normal, Start, End)
+                pygame.draw.circle(self._screen, color, (sx, sy), rad)
+                pygame.draw.circle(self._screen, border_color, (sx, sy), rad, border_width)
 
             # Start e End ganham uma aura pulsante / anel extra
             if node_type in ("start_hub", "end_hub"):
                 extra_rad = rad + int(6 * self.zoom)
-                pygame.draw.circle(self._screen, (255, 255, 255), (sx, sy), extra_rad, width=2)
+                if self._screen is not None:
+                    pygame.draw.circle(self._screen, (255, 255, 255), (sx, sy), extra_rad, width=2)
 
     def draw_hubs(self, graph: Any) -> None:
         """Desenha os hubs com texto de tamanho fixo e inteligência de visibilidade."""
         # Usamos uma fonte fixa (não escala com o zoom)
-        font = self._font_small 
+        font = self._font_small
         if self._screen is None or font is None:
             return
 
@@ -429,10 +434,10 @@ class Renderer:
             # 1. Matemática de Projeção
             wx, wy = node.x * self.world_scale, node.y * self.world_scale
             sx, sy = self._world_to_screen(wx, wy)
-            
+
             # O raio do nó escala com o zoom, mas o texto NÃO.
             rad = int(self.radius * self.zoom)
-            
+
             # 2. Desenha a Forma (Shape) do Nó
             if rad > 0:
                 color = self._color_for_node(node)
@@ -446,12 +451,12 @@ class Renderer:
                 # Abrevia apenas nomes extremos para manter a estética
                 if len(display_name) > 12:
                     display_name = display_name[:10] + ".."
-                    
+
                 label = font.render(display_name, True, (255, 255, 255))
-                
+
                 # Centraliza o texto no ponto exato SX, SY (que se move com a câmera)
                 text_rect = label.get_rect(center=(sx, sy))
-                
+
                 # Só desenha o texto se ele couber (ou quase couber) dentro do nó
                 # Isso evita que o texto fique flutuando sobre um "pontinho" minúsculo
                 if rad > label.get_width() / 2.5:
@@ -679,3 +684,11 @@ class Renderer:
             if node:
                 return (node.x * self.world_scale, node.y * self.world_scale)
         return None
+
+    def reset_camera(self) -> None:
+        """Reset the flag of the camera initialization"""
+
+        self._is_camera_initialized = False
+        self.camera_x = 0.0
+        self.camera_y = 0.0
+        self.zoom = 1.0
